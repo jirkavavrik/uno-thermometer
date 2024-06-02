@@ -1,6 +1,6 @@
-# uno-r3-thermometer
+# uno-thermometer
 
-Uno R3 thermometer is a very simple device based on the Arduino Uno R3/R4 to measure and display indoor temperature and humidity. The values are shown on an OLED display.
+Uno thermometer is a very simple device based on the Arduino Uno R3/R4 to measure and display indoor temperature and humidity. The values are shown on an OLED display.
 
 features:
 * Arduino Uno R3 or R4
