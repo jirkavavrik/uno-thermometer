@@ -7,6 +7,9 @@
 #define USE_GSM //comment out to disable GSM IoT functionality
 //#define DEBUGSERIAL
 
+//comment out if not using CO2 sensor
+#define USE_SCD30 
+
 #include "U8g2lib.h"
 #if defined USE_DHT22
 #include <DHT.h>
@@ -15,6 +18,12 @@
 #endif
 //#include "Arduino.h"
 #include <avr/dtostrf.h>
+
+#if defined USE_SCD30
+#include <Adafruit_SCD30.h>
+Adafruit_SCD30  scd30;
+int scd30_fully_ready = 0;
+#endif
 
 U8G2_SSD1306_128X64_NONAME_1_HW_I2C mujOled(U8G2_R0);
 
@@ -43,7 +52,7 @@ unsigned long last_adafruit_sent = 0;
 
 unsigned long last_random = millis();
 
-void update_lcd(char* row1, char* row2) {
+void update_lcd(char* row1, char* row2, char* row3) {
      mujOled.firstPage();
     do {
         mujOled.setFont(u8g_font_10x20);  
@@ -51,6 +60,8 @@ void update_lcd(char* row1, char* row2) {
         mujOled.print(row1);
         mujOled.setCursor(x,y+14);
         mujOled.print(row2);
+        mujOled.setCursor(x,y+28);
+        mujOled.print(row3);
     } while( mujOled.nextPage() );
 }
 
@@ -147,6 +158,19 @@ void setup() {
   }
   #endif
 
+  #if defined USE_SCD30
+    /*Try to initialize SCD30 CO2 sensor*/
+  if (!scd30.begin()) { /*begin function also calls _init() that starts continuous measurement and sets interval to 2 s*/
+  #ifdef DEBUGSERIAL
+    Serial.println("Failed to find SCD30 chip");
+    #endif
+    //while (1) { delay(10); }
+  }
+  #ifdef DEBUGSERIAL
+  Serial.println("continuing...");
+  #endif
+  #endif
+
   mujOled.begin();
   delay(1000);
 
@@ -175,6 +199,8 @@ void loop() {
   delay(1000);
   #endif
   static float t, h;
+  static unsigned int co2;
+
   if(millis() - last_random > 10000 || last_random == 0 || millis() < last_random) {
     #if defined USE_DHT22
     t = dht.readTemperature();
@@ -188,7 +214,30 @@ void loop() {
     #elif defined USE_SHT31
     h = sht31.readHumidity();
     #endif
+    #if defined USE_SCD30
+  /*check if SCD30 has made a measurement*/
+  if (scd30.dataReady()){
+    Serial.println("Data available!");
+    if (!scd30.read()){
+      Serial.println("Error reading sensor data");
+      return;
+    }
+    co2 = scd30.CO2;
+  }
+    /*because first reading from SCD30 gives co2 value of zero, we wait for first nonzero reading before setting the interval from 2 to desired higher value*/
+  if(!scd30_fully_ready) {
+    if(co2) {
+      if (!scd30.setMeasurementInterval(10)){
+        Serial.println("Failed to set measurement interval");
+      } else {
+        scd30_fully_ready = 1;
+      }
+    }
+  }
+    #endif
     delay(500);
+
+
     
     char temperature[10];
     char buff1[5];
@@ -204,9 +253,24 @@ void loop() {
     dtostrf(h, 4, 1, buff2);
     sprintf(humidity, "V: %s %c", buff2, 0x25);
 
+#if defined USE_SCD30
+    char co2_string[14];
+    sprintf(co2_string, "C: %u ppm", co2);
+#endif
+
+    #if defined USE_SCD30
+    x = random(0,18);
+    #else
     x = random(0,38);
+    #endif
+
+    #if defined USE_SCD30
+    y = random(13, 36);//13,50 //ZKONTROLOVAT VARIANTU S SCD30!
+    #else
     y = random(13, 50);//13,50
-    update_lcd(temperature,humidity);
+    #endif
+
+    update_lcd(temperature,humidity,co2_string);
     
     if(t >= 30.0f) {
       digitalWrite(A1, HIGH);
@@ -223,6 +287,11 @@ void loop() {
     if (!isnan(h)) {
       send_to_adafruit_io(h, IO_USERNAME"/feeds/"IO_FEED_HUM);
       } else {return;}
+      #if defined USE_SCD30
+      if (!isnan(co2) && co2!=0) {
+      send_to_adafruit_io(co2, IO_USERNAME"/feeds/"IO_FEED_CO2);
+      } else {return;}
+      #endif
     last_adafruit_sent = millis();
   }
   #endif
